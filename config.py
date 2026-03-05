@@ -5,7 +5,7 @@ BOT_1_NAME = 'BotA'
 BOT_1_FILE = './bot.py'
 
 BOT_2_NAME = 'BotB'
-BOT_2_FILE= './example_bot.py'
+BOT_2_FILE= './earlybot.py'
 
 # GAME PROGRESS IS RECORDED HERE
 GAME_LOG_FOLDER = './logs'
