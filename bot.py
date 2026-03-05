@@ -117,28 +117,107 @@ class Player(BaseBot):
         hand_bucket = self.evaluate_hand(current_state.my_hand, board)
         board_texture = self.classify_board(board)
 
-        info_value = self.estimate_info_value(hand_bucket, board_texture, pot)
+        effective_stack = min(current_state.my_chips, current_state.opp_chips)
+        spr = self.compute_spr(effective_stack, pot)
+        info_value = self.estimate_info_value(hand_bucket, board_texture, pot, spr, my_stack)
 
-        max_bid = int(0.25 * my_stack)
-        bid_amount = min(int(info_value), max_bid)
+        bid_amount = int(info_value)
 
         return ActionBid(max(0, bid_amount))
-    
+        
     def evaluate_hand(self, my_cards, board):
 
         if not board:
             return self.evaluate_preflop_hand(my_cards)
 
-        # Placeholder logic
-        return "medium"
+        all_cards = my_cards + board
+
+        rank_map = {'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,
+                    'T':10,'J':11,'Q':12,'K':13,'A':14}
+
+        # ---------- SUIT COUNT ----------
+        suit_counts = {}
+        for card in all_cards:
+            suit = card[1]
+            suit_counts[suit] = suit_counts.get(suit, 0) + 1
+
+        flush = max(suit_counts.values()) >= 5
+        flush_draw = max(suit_counts.values()) == 4
+
+        # ---------- RANK COUNT ----------
+        rank_counts = {}
+        for card in all_cards:
+            rank = card[0]
+            rank_counts[rank] = rank_counts.get(rank, 0) + 1
+
+        counts = sorted(rank_counts.values(), reverse=True)
+
+        # ---------- STRAIGHT CHECK ----------
+        ranks = set(rank_map[c[0]] for c in all_cards)
+        ranks = sorted(ranks)
+
+        if 14 in ranks:
+            ranks.append(1)   # wheel straight
+
+        straight = False
+        for i in range(len(ranks)-4):
+            if ranks[i+4] - ranks[i] == 4:
+                straight = True
+                break
+
+        # ---------- HAND CLASSIFICATION ----------
+        if flush and straight:
+            return "nuts"
+
+        if counts[0] == 4:
+            return "nuts"
+
+        if counts[0] == 3 and counts[1] >= 2:
+            return "nuts"
+
+        if flush:
+            return "nuts"
+
+        if straight:
+            return "very_strong"
+
+        if counts[0] == 3:
+            return "very_strong"
+
+        if counts[0] == 2 and counts[1] == 2:
+            return "strong"
+
+        if counts[0] == 2:
+            return "medium"
+
+        if flush_draw:
+            return "strong_draw"
+
+        return "air"
 
     def classify_board(self, board):
-
         if len(board) < 3:
             return "unknown"
+        # ---------- Check for paired board ----------
+        ranks = [card[0] for card in board]
+        if len(set(ranks)) < len(ranks):
+            return "paired"
+        # ---------- Check for suit concentration ----------
+        suits = [card[1] for card in board]
+        suit_counts = {}
+        for suit in suits:
+            suit_counts[suit] = suit_counts.get(suit, 0) + 1
+        if max(suit_counts.values()) >= 2:
+            return "wet"
+        # ---------- Check for connected ranks ----------
+        rank_map = {'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'T':10,'J':11,'Q':12,'K':13,'A':14}
 
-        # Simple placeholder
-        return "neutral"
+        rank_values = sorted(rank_map[r] for r in ranks)
+
+        if max(rank_values) - min(rank_values) <= 4:
+            return "wet"
+
+        return "dry"
 
     def compute_spr(self, effective_stack, pot):
 
@@ -146,20 +225,41 @@ class Player(BaseBot):
             return 100
         return effective_stack / pot
     
-    def estimate_info_value(self, hand_bucket, board_texture, pot):
+    def estimate_info_value(self, hand_bucket, board_texture, pot, spr, my_stack):
 
-        base = pot * 0.2
+        # Always force opponent to pay something
+        floor = max(30, int(0.06 * pot))
 
-        if hand_bucket in ["medium", "strong_draw"]:
-            base *= 1.5
+        if hand_bucket == "medium":
+            value = pot * 0.50
+        elif hand_bucket == "strong_draw":
+            value = pot * 0.40
+        elif hand_bucket == "strong":
+            value = pot * 0.30
+        elif hand_bucket == "very_strong":
+            value = pot * 0.12
+        elif hand_bucket == "nuts":
+            value = pot * 0.08
+        else:
+            value = pot * 0.10
 
         if board_texture == "wet":
-            base *= 1.5
+            value *= 1.30
+        elif board_texture == "paired":
+            value *= 1.05
+        else: 
+            value *= 0.90
 
-        if hand_bucket in ["nuts", "air"]:
-            base *= 0.5
-
-        return base
+        if spr > 8:
+            value *= 1.30
+        elif spr > 5:
+            value *= 1.20
+        elif spr < 2:
+            value *= 0.80
+            
+        value = max(value, floor)
+        value = min(value, 0.50 * pot)
+        return int(value)
     
     def play_preflop(self, state, hand_bucket):
 
@@ -217,7 +317,7 @@ class Player(BaseBot):
     def raise_or_bet_big(self, state):
         if state.can_act(ActionRaise):
             min_raise, max_raise = state.raise_bounds
-            return ActionRaise(min(max_raise, int(0.75 * max_raise)))
+            return ActionRaise(int(0.75 * max_raise))
         if state.can_act(ActionCall):
             return ActionCall()
         return ActionCheck()
@@ -277,9 +377,13 @@ class Player(BaseBot):
 
 
     def semi_bluff(self, state):
+
         if state.can_act(ActionRaise):
-            min_raise, _ = state.raise_bounds
-            return ActionRaise(min_raise)
+            min_raise, max_raise = state.raise_bounds
+            amount = int(random.uniform(0.4, 0.65) * max_raise)
+            amount = max(min_raise, amount)
+            return ActionRaise(amount)
+
         return self.check_call(state)
 
 
