@@ -90,7 +90,7 @@ class Player(BaseBot):
         # 3. INFORMATION BLUFFING (Using the Sneak Peek)
         if bucket == "air" and info_advantage and state.can_act(ActionRaise):
             opp_card_rank = state.opp_revealed_cards[0][0]
-            if opp_card_rank in "23456" and random.random() < 0.20:
+            if opp_card_rank in "23456" and random.random() < 0.30:
                 bet = max(min_r, min(int(0.35 * pot), max_r))
                 return ActionRaise(bet)
 
@@ -183,7 +183,7 @@ class Player(BaseBot):
         return effective_stack / pot
     
     def estimate_info_value(self, hand_bucket, board_texture, pot, spr, my_stack):
-        floor = max(40, int(0.07 * pot))
+        floor = max(80, int(0.10 * pot))
         if hand_bucket == "medium": value = pot * 0.45
         elif hand_bucket == "strong_draw": value = pot * 0.35
         elif hand_bucket == "strong": value = pot * 0.25
@@ -204,11 +204,18 @@ class Player(BaseBot):
         return int(value)
     
     def play_preflop(self, state, hand_bucket):
+
+        if state.cost_to_call > 700:
+            if hand_bucket in ["premium", "strong"]:
+                return ActionCall()
+            return ActionFold()
+
         if hand_bucket == "premium":
             if state.can_act(ActionRaise):
                 min_raise, _ = state.raise_bounds
                 return ActionRaise(min_raise)
-            if state.can_act(ActionCall): return ActionCall()
+            if state.can_act(ActionCall):
+                return ActionCall()
             return ActionCheck()
 
         if hand_bucket == "trash":
@@ -216,7 +223,9 @@ class Player(BaseBot):
                 return ActionFold()
             return ActionCheck()
 
-        if state.can_act(ActionCall): return ActionCall()
+        if state.can_act(ActionCall):
+            return ActionCall()
+
         return ActionCheck()
 
     def evaluate_preflop_hand(self, my_cards):
